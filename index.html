@@ -828,8 +828,8 @@ let editId=null, editPhoto=null, editPhotoChanged=false, editTags=[];
 function openEdit(id) {
   editId=id||null;
   const recipe=id?state.recipes.find(r=>r.id===id):null;
-  editPhoto = id ? (getPhoto(id) || null) : null;
-  editPhotoChanged = false; // reset — photo not changed yet
+  editPhoto = id ? (getPhoto(id) || null) : null; // null for new recipe
+  editPhotoChanged = false; // always reset — must explicitly change photo
   editTags=recipe?[...(recipe.tags||[])]:[];
   document.getElementById("edit-title").textContent=recipe?"Edit Recipe":"New Recipe";
   document.getElementById("save-btn").textContent=recipe?"Save Changes":"Add Recipe";
@@ -901,7 +901,8 @@ document.getElementById("save-btn").onclick=async function(){
     const date=new Date().toLocaleDateString("en-US",{month:"short",day:"numeric"});
     const id=state.nextId++;
     state.recipes.push({id,title,tags,comment,ingredients,steps,date,favourite:false});
-    if(editPhoto){ photoCache[String(id)]=editPhoto; await dbSavePhoto(id,editPhoto); }
+    // Only save photo if user explicitly picked one for THIS new recipe
+    if(editPhotoChanged && editPhoto){ photoCache[String(id)]=editPhoto; await dbSavePhoto(id,editPhoto); }
   }
   saveState(); document.getElementById("edit-overlay").style.display="none"; renderTagRow(); renderList();
 };
