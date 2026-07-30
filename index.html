@@ -352,14 +352,14 @@ const STORAGE_KEY = "myrecipes_v2"; // v2 = no photos in localStorage
 
 let state = {
   recipes: [
-    { id:1, title:"Avocado Toast", tags:["Breakfast"], comment:"Add chili flakes and a poached egg on top!", ingredients:["2 slices sourdough bread","1 ripe avocado","Chili flakes","Salt & pepper"], steps:["Toast the sourdough until golden.","Mash avocado, season with salt and pepper.","Spread on toast and add toppings."], date:"Mar 12", favourite:false },
-    { id:2, title:"Chocolate Lava Cake", tags:["Dessert"], comment:"Bake at 200°C for exactly 12 min.", ingredients:["113g dark chocolate","113g butter","2 eggs","60g sugar","2 tbsp flour"], steps:["Preheat oven to 200°C. Grease ramekins.","Melt chocolate and butter. Cool slightly.","Whisk eggs and sugar, fold in chocolate then flour.","Bake 12 minutes. Invert and serve."], date:"Mar 28", favourite:true },
+    { id:9001, title:"Avocado Toast", tags:["Breakfast"], comment:"Add chili flakes and a poached egg on top!", ingredients:["2 slices sourdough bread","1 ripe avocado","Chili flakes","Salt & pepper"], steps:["Toast the sourdough until golden.","Mash avocado, season with salt and pepper.","Spread on toast and add toppings."], date:"Mar 12", favourite:false },
+    { id:9002, title:"Chocolate Lava Cake", tags:["Dessert"], comment:"Bake at 200°C for exactly 12 min.", ingredients:["113g dark chocolate","113g butter","2 eggs","60g sugar","2 tbsp flour"], steps:["Preheat oven to 200°C. Grease ramekins.","Melt chocolate and butter. Cool slightly.","Whisk eggs and sugar, fold in chocolate then flour.","Bake 12 minutes. Invert and serve."], date:"Mar 28", favourite:true },
   ],
   grocery: [],
   groceryCats: ["Vegetables","Fruit","Meat & Fish","Dairy","Bakery","Baking","Drinks","Other"],
   activeTags: [],
   showFavourites: false,
-  nextId: 100,
+  nextId: 9100,
 };
 
 // Photos cached in memory after loading from IndexedDB
@@ -374,12 +374,21 @@ function loadState() {
       if (p.grocery) state.grocery = p.grocery;
       if (p.groceryCats) state.groceryCats = p.groceryCats;
       if (p.nextId) state.nextId = p.nextId;
-      // Migrate old data: folder→tags, strip photos from recipes
+      // Migrate old data
       state.recipes.forEach(r => {
         if (!r.tags) r.tags = r.folder ? [r.folder] : [];
         delete r.folder;
-        delete r.photo; // photos now live in IndexedDB only
+        delete r.photo;
       });
+      // Ensure all IDs are unique — fix any duplicates
+      const seen = new Set();
+      state.recipes.forEach(r => {
+        if (seen.has(r.id)) { r.id = state.nextId++; }
+        seen.add(r.id);
+      });
+      // Ensure nextId is always higher than every existing recipe ID
+      const maxId = state.recipes.reduce((m, r) => Math.max(m, r.id), 0);
+      if (state.nextId <= maxId) state.nextId = maxId + 1;
     }
   } catch(e) {}
 }
