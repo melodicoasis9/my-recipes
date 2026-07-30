@@ -138,6 +138,14 @@
     .ai-ing-cat{font-size:13px;padding:5px 8px;border:1.5px solid #e8ddd5;border-radius:8px;color:#2c1810;background:#fdf8f3;outline:none;appearance:none;max-width:140px;}
     .ai-status{font-size:13px;color:#8a6a5a;text-align:center;padding:16px 0;}
     .ai-status-spinner{display:inline-block;width:16px;height:16px;border:2px solid #e8ddd5;border-top-color:#c9643a;border-radius:50%;animation:spin 0.8s linear infinite;margin-right:8px;vertical-align:middle;}
+    /* Sort buttons */
+    .sort-btn{padding:5px 12px;border:1.5px solid #e8ddd5;border-radius:16px;background:transparent;color:#8a6a5a;font-size:12px;font-family:Georgia,serif;}
+    .sort-btn.active{border-color:#c9643a;background:#c9643a;color:#fff;}
+    /* Category manager */
+    .cat-mgr-row{display:flex;gap:6px;align-items:center;padding:8px 0;border-bottom:1px solid #f5ede4;}
+    .cat-mgr-name{flex:1;font-size:15px;color:#2c1810;}
+    .cat-mgr-input{flex:1;padding:7px 10px;border:1.5px solid #c9643a;border-radius:8px;font-size:14px;color:#2c1810;background:#fdf8f3;outline:none;}
+    .cat-mgr-move:disabled{opacity:0.2;}
   </style>
 </head>
 <body>
@@ -165,6 +173,11 @@
   </div>
   <div id="tab-recipes">
     <div id="tag-row"></div>
+    <div id="sort-row" style="display:flex;align-items:center;gap:8px;padding:8px 16px;background:#fff;border-bottom:1px solid #e8ddd5;">
+      <span style="font-size:12px;color:#8a6a5a;text-transform:uppercase;letter-spacing:0.08em;">Sort:</span>
+      <button class="sort-btn active" id="sort-date-btn">Date ↕</button>
+      <button class="sort-btn" id="sort-name-btn">Name ↕</button>
+    </div>
     <div id="list"></div>
     <div id="fab"><button id="fab-btn">+</button></div>
   </div>
@@ -275,7 +288,7 @@
 <div class="overlay" id="ai-cat-overlay" style="display:none;">
   <div class="sheet">
     <h2 class="sheet-title">🛒 Add to Grocery List</h2>
-    <p style="font-size:13px;color:#8a6a5a;line-height:1.5;" id="ai-cat-desc">AI is suggesting categories for each ingredient. You can change any before adding.</p>
+    <p style="font-size:13px;color:#8a6a5a;line-height:1.5;" id="ai-cat-desc">Choose a category for each ingredient. Your choices are saved for next time.</p>
     <div id="ai-cat-status" class="ai-status" style="display:none;"></div>
     <div id="ai-cat-list"></div>
     <button class="btn-primary" id="ai-cat-confirm" style="display:none;">Add to Grocery List</button>
@@ -357,6 +370,7 @@ let state = {
   ],
   grocery: [],
   groceryCats: ["Vegetables","Fruit","Meat & Fish","Dairy","Bakery","Baking","Drinks","Other"],
+  ingredientCategoryMemory: {}, // remembers ingredient name → category
   activeTags: [],
   showFavourites: false,
   nextId: 9100,
@@ -373,6 +387,7 @@ function loadState() {
       if (p.recipes) state.recipes = p.recipes;
       if (p.grocery) state.grocery = p.grocery;
       if (p.groceryCats) state.groceryCats = p.groceryCats;
+      if (p.ingredientCategoryMemory) state.ingredientCategoryMemory = p.ingredientCategoryMemory;
       if (p.nextId) state.nextId = p.nextId;
       // Migrate old data
       state.recipes.forEach(r => {
@@ -401,7 +416,9 @@ function saveState() {
     });
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       recipes, grocery: state.grocery,
-      groceryCats: state.groceryCats, nextId: state.nextId
+      groceryCats: state.groceryCats,
+      ingredientCategoryMemory: state.ingredientCategoryMemory,
+      nextId: state.nextId
     }));
   } catch(e) {}
 }
@@ -453,6 +470,9 @@ function allTags() {
   return [...set].sort();
 }
 
+// ── Sort state ─────────────────────────────────────────────────────────────────
+let sortMode = "date-desc"; // date-desc | date-asc | name-asc | name-desc
+
 // ── Tag row ────────────────────────────────────────────────────────────────────
 function renderTagRow() {
   const row = document.getElementById("tag-row");
@@ -479,10 +499,18 @@ function renderTagRow() {
 function renderList() {
   const list = document.getElementById("list");
   list.innerHTML = "";
-  const filtered = state.recipes.filter(r => {
+  let filtered = state.recipes.filter(r => {
     if (state.showFavourites) return r.favourite;
     if (state.activeTags.length === 0) return true;
     return state.activeTags.every(t => (r.tags||[]).includes(t));
+  });
+
+  // Apply sort
+  filtered = [...filtered].sort((a, b) => {
+    if (sortMode === "name-asc") return a.title.localeCompare(b.title);
+    if (sortMode === "name-desc") return b.title.localeCompare(a.title);
+    if (sortMode === "date-asc") return a.id - b.id;
+    return b.id - a.id; // date-desc (default)
   });
   if (filtered.length === 0) {
     const e = el("div","empty");
@@ -529,8 +557,9 @@ function renderCatSelect() {
 function renderGrocery() {
   const list = document.getElementById("grocery-list");
   list.innerHTML = "";
-  // Clean up any checked items that were left over (e.g. from a previous session)
+  // Remove any stale checked items from old versions
   state.grocery = state.grocery.filter(g => !g.checked);
+  saveState();
   const count = state.grocery.length;
   document.getElementById("grocery-tab-btn").textContent =
     count > 0 ? `🛒 Groceries (${count})` : "🛒 Groceries";
@@ -557,13 +586,20 @@ function renderGrocery() {
     hdr.innerHTML = `<span class="g-category-title">${cat}</span><span class="g-category-count">${items.length} item${items.length>1?"s":""}</span>`;
     block.appendChild(hdr);
     items.forEach(item => {
-      const row = el("div","g-item"+(item.checked?" checked":""));
-      const check = el("button","g-check"+(item.checked?" checked":""),item.checked?"✓":"");
+      const row = el("div","g-item");
+      const check = el("button","g-check","");
+      const name = el("span","g-name",item.name);
       check.onclick = () => {
-        item.checked=true; saveState(); renderGrocery();
-        setTimeout(()=>{ state.grocery=state.grocery.filter(g=>g.id!==item.id); saveState(); renderGrocery(); },400);
+        row.classList.add("checked");
+        check.classList.add("checked");
+        check.textContent = "✓";
+        name.classList.add("checked");
+        setTimeout(() => {
+          state.grocery = state.grocery.filter(g => g.id !== item.id);
+          saveState();
+          renderGrocery();
+        }, 400);
       };
-      const name = el("span","g-name"+(item.checked?" checked":""),item.name);
       const editBtn = el("button","g-edit-btn","✏️");
       editBtn.title = "Edit item";
       editBtn.onclick = () => openEditGrocery(item.id);
@@ -617,6 +653,10 @@ document.getElementById("edit-grocery-save").onclick = () => {
     const name = document.getElementById("edit-grocery-name").value.trim();
     if (name) item.name = name;
     item.category = document.getElementById("edit-grocery-cat").value;
+    // Remember this mapping for future
+    if (item.category !== "Uncategorized") {
+      state.ingredientCategoryMemory[item.name.toLowerCase()] = item.category;
+    }
     saveState(); renderGrocery();
   }
   document.getElementById("edit-grocery-overlay").style.display="none";
@@ -626,17 +666,90 @@ document.getElementById("edit-grocery-overlay").onclick = function(e){ if(e.targ
 
 // ── Category manager ───────────────────────────────────────────────────────────
 document.getElementById("grocery-manage-btn").onclick = () => { renderCatManager(); document.getElementById("cat-mgr-overlay").style.display="flex"; };
+
+let editingCatIdx = null;
+let dragSrcIdx = null;
+
 function renderCatManager() {
-  const list = document.getElementById("cat-mgr-list"); list.innerHTML="";
-  getCats().forEach((cat,idx) => {
+  const list = document.getElementById("cat-mgr-list");
+  list.innerHTML = "";
+  getCats().forEach((cat, idx) => {
     const row = el("div","cat-mgr-row");
-    const name = el("span","cat-mgr-name",cat);
-    const del = el("button","btn-action btn-danger","🗑");
-    del.onclick = () => {
-      state.grocery.forEach(g=>{ if(g.category===cat) g.category="Uncategorized"; });
-      state.groceryCats.splice(idx,1); saveState(); renderCatManager(); renderGrocery();
-    };
-    row.append(name,del); list.appendChild(row);
+    row.dataset.idx = idx;
+
+    if (editingCatIdx === idx) {
+      const inp = el("input","cat-mgr-input");
+      inp.value = cat;
+      const saveBtn = el("button","btn-action","✓");
+      saveBtn.style.cssText = "border-color:#4caf7d;color:#4caf7d;";
+      saveBtn.onclick = () => {
+        const newName = inp.value.trim();
+        if (newName && !getCats().includes(newName)) {
+          const old = getCats()[idx];
+          Object.keys(state.ingredientCategoryMemory).forEach(k => {
+            if (state.ingredientCategoryMemory[k] === old) state.ingredientCategoryMemory[k] = newName;
+          });
+          state.grocery.forEach(g => { if(g.category === old) g.category = newName; });
+          getCats()[idx] = newName;
+          saveState(); renderGrocery();
+        }
+        editingCatIdx = null; renderCatManager();
+      };
+      inp.addEventListener("keydown", e => { if(e.key==="Enter") saveBtn.onclick(); if(e.key==="Escape"){ editingCatIdx=null; renderCatManager(); }});
+      const cancelBtn = el("button","btn-action","✕");
+      cancelBtn.onclick = () => { editingCatIdx = null; renderCatManager(); };
+      row.append(inp, saveBtn, cancelBtn);
+      setTimeout(() => inp.focus(), 50);
+
+    } else {
+      // Drag handle
+      const handle = el("span","","⠿");
+      handle.style.cssText = "color:#ccc;font-size:20px;cursor:grab;padding:0 6px;touch-action:none;user-select:none;flex-shrink:0;";
+      const name = el("span","cat-mgr-name", cat);
+      const editBtn = el("button","btn-action","✏️");
+      editBtn.onclick = () => { editingCatIdx = idx; renderCatManager(); };
+      const delBtn = el("button","btn-action btn-danger","🗑");
+      delBtn.onclick = () => {
+        state.grocery.forEach(g => { if(g.category===cat) g.category="Uncategorized"; });
+        state.groceryCats.splice(idx,1);
+        if(editingCatIdx===idx) editingCatIdx=null;
+        saveState(); renderCatManager(); renderGrocery();
+      };
+      row.append(handle, name, editBtn, delBtn);
+
+      // Touch drag-and-drop
+      handle.addEventListener("touchstart", e => {
+        dragSrcIdx = idx;
+        row.style.opacity = "0.5";
+        e.preventDefault();
+      }, { passive: false });
+
+      handle.addEventListener("touchmove", e => {
+        e.preventDefault();
+        const touch = e.touches[0];
+        const el = document.elementFromPoint(touch.clientX, touch.clientY);
+        const targetRow = el?.closest(".cat-mgr-row");
+        if (targetRow && targetRow !== row) {
+          const targetIdx = parseInt(targetRow.dataset.idx);
+          if (!isNaN(targetIdx) && targetIdx !== dragSrcIdx) {
+            const cats = getCats();
+            const [moved] = cats.splice(dragSrcIdx, 1);
+            cats.splice(targetIdx, 0, moved);
+            dragSrcIdx = targetIdx;
+            saveState();
+            renderCatManager();
+          }
+        }
+      }, { passive: false });
+
+      handle.addEventListener("touchend", () => {
+        dragSrcIdx = null;
+        renderCatManager();
+        renderGrocery();
+      }, { passive: true });
+    }
+
+    list.appendChild(row);
   });
 }
 document.getElementById("cat-mgr-add-btn").onclick = () => {
@@ -646,8 +759,8 @@ document.getElementById("cat-mgr-add-btn").onclick = () => {
   inp.value="";
 };
 document.getElementById("cat-mgr-new-input").addEventListener("keydown",e=>{ if(e.key==="Enter") document.getElementById("cat-mgr-add-btn").click(); });
-document.getElementById("cat-mgr-done-btn").onclick = () => { document.getElementById("cat-mgr-overlay").style.display="none"; };
-document.getElementById("cat-mgr-overlay").onclick = function(e){ if(e.target===this) this.style.display="none"; };
+document.getElementById("cat-mgr-done-btn").onclick = () => { editingCatIdx=null; document.getElementById("cat-mgr-overlay").style.display="none"; };
+document.getElementById("cat-mgr-overlay").onclick = function(e){ if(e.target===this){ editingCatIdx=null; this.style.display="none"; } };
 
 // ── AI ingredient categorisation ───────────────────────────────────────────────
 let aiCatIngredients = []; // [{name, category}]
@@ -663,61 +776,22 @@ async function openAiCatModal(recipe) {
   if (!newIngs.length) { showToast("All ingredients already in grocery list!"); return; }
 
   aiCatRecipeTitle = recipe.title;
-  aiCatIngredients = newIngs.map(name=>({ name: name.trim(), category: "Uncategorized" }));
+  aiCatIngredients = newIngs.map(name => {
+    // Check memory first — use saved category if available
+    const remembered = state.ingredientCategoryMemory[name.trim().toLowerCase()];
+    return { name: name.trim(), category: remembered || "Uncategorized" };
+  });
 
-  // Show modal with spinner
+  // Pre-fill categories from memory, Uncategorized for new ingredients
+  aiCatIngredients = newIngs.map(name => ({
+    name: name.trim(),
+    category: state.ingredientCategoryMemory[name.trim().toLowerCase()] || "Uncategorized"
+  }));
+
+  // Show modal immediately — no spinner, no AI
   document.getElementById("ai-cat-overlay").style.display = "flex";
-  document.getElementById("ai-cat-status").style.display = "block";
-  document.getElementById("ai-cat-status").innerHTML = `<span class="ai-status-spinner"></span>AI is categorising ingredients…`;
-  document.getElementById("ai-cat-list").innerHTML = "";
-  document.getElementById("ai-cat-confirm").style.display = "none";
-  document.getElementById("ai-cat-desc").textContent = "AI is suggesting categories. You can adjust any before adding.";
-
-  try {
-    const cats = getCats();
-    const prompt = `You are a grocery categorisation assistant. Given a list of ingredients (which may be in Lithuanian, English, or Russian), assign each one to the most appropriate category from this list: ${cats.join(", ")}, Uncategorized.
-
-Ingredients:
-${aiCatIngredients.map((ing,i)=>`${i+1}. ${ing.name}`).join("\n")}
-
-Respond ONLY with a JSON array of objects with "index" (1-based) and "category" fields. Example: [{"index":1,"category":"Vegetables"},{"index":2,"category":"Dairy"}]
-If unsure, use "Uncategorized". Only use categories from the provided list.`;
-
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 1000,
-        messages: [{ role: "user", content: prompt }]
-      })
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      const text = data.content.map(c=>c.text||"").join("");
-      // Parse JSON from response
-      const jsonMatch = text.match(/\[[\s\S]*\]/);
-      if (jsonMatch) {
-        const suggestions = JSON.parse(jsonMatch[0]);
-        suggestions.forEach(s => {
-          const idx = s.index - 1;
-          if (idx >= 0 && idx < aiCatIngredients.length) {
-            const cat = s.category;
-            if (cats.includes(cat) || cat === "Uncategorized") {
-              aiCatIngredients[idx].category = cat;
-            }
-          }
-        });
-      }
-    }
-  } catch(e) {
-    // If AI fails, just use Uncategorized for all — don't block the user
-    console.warn("AI categorisation failed:", e);
-  }
-
-  // Render the confirmation list
   document.getElementById("ai-cat-status").style.display = "none";
+  document.getElementById("ai-cat-desc").textContent = "Choose a category for each ingredient. Your choices are saved for next time.";
   renderAiCatList();
   document.getElementById("ai-cat-confirm").style.display = "block";
 }
@@ -761,6 +835,10 @@ function renderAiCatList() {
 document.getElementById("ai-cat-confirm").onclick = () => {
   aiCatIngredients.forEach(ing => {
     state.grocery.push({ id: Date.now()+Math.random(), name: ing.name, category: ing.category, checked: false });
+    // Remember this ingredient→category mapping for next time
+    if (ing.category !== "Uncategorized") {
+      state.ingredientCategoryMemory[ing.name.toLowerCase()] = ing.category;
+    }
   });
   saveState(); renderGrocery();
   document.getElementById("ai-cat-overlay").style.display = "none";
@@ -933,6 +1011,22 @@ function switchTab(tab) {
 document.querySelectorAll(".tab").forEach(t=>{ t.onclick=()=>switchTab(t.dataset.tab); });
 
 document.getElementById("fav-btn").onclick=function(){ state.showFavourites=!state.showFavourites; state.activeTags=[]; this.classList.toggle("active",state.showFavourites); renderTagRow(); renderList(); };
+
+// ── Sort buttons ───────────────────────────────────────────────────────────────
+document.getElementById("sort-date-btn").onclick = function() {
+  sortMode = sortMode === "date-desc" ? "date-asc" : "date-desc";
+  this.textContent = sortMode === "date-desc" ? "Date ↓" : "Date ↑";
+  document.getElementById("sort-name-btn").classList.remove("active");
+  this.classList.add("active");
+  renderList();
+};
+document.getElementById("sort-name-btn").onclick = function() {
+  sortMode = sortMode === "name-asc" ? "name-desc" : "name-asc";
+  this.textContent = sortMode === "name-asc" ? "Name A→Z" : "Name Z→A";
+  document.getElementById("sort-date-btn").classList.remove("active");
+  this.classList.add("active");
+  renderList();
+};
 
 // ── Backup ─────────────────────────────────────────────────────────────────────
 document.getElementById("backup-btn").onclick=()=>{ document.getElementById("import-msg").style.display="none"; document.getElementById("backup-overlay").style.display="flex"; };
