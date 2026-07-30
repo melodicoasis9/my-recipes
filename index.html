@@ -823,12 +823,13 @@ detailSheet.addEventListener("touchend",e=>{ if(swipeStartX===null) return; if(s
 document.getElementById("detail-back").onclick=closeDetail;
 
 // ── Edit / Add recipe ──────────────────────────────────────────────────────────
-let editId=null, editPhoto=null, editTags=[];
+let editId=null, editPhoto=null, editPhotoChanged=false, editTags=[];
 
 function openEdit(id) {
   editId=id||null;
   const recipe=id?state.recipes.find(r=>r.id===id):null;
-  editPhoto = id ? getPhoto(id) : null;
+  editPhoto = id ? (getPhoto(id) || null) : null;
+  editPhotoChanged = false; // reset — photo not changed yet
   editTags=recipe?[...(recipe.tags||[])]:[];
   document.getElementById("edit-title").textContent=recipe?"Edit Recipe":"New Recipe";
   document.getElementById("save-btn").textContent=recipe?"Save Changes":"Add Recipe";
@@ -873,13 +874,13 @@ document.getElementById("f-comment").addEventListener("input",function(){ autoRe
 
 function renderPhotoArea() {
   const area=document.getElementById("photo-area");
-  if(editPhoto){ area.innerHTML=""; const img=document.createElement("img"); img.src=editPhoto; img.className="photo-preview-img"; area.appendChild(img); const btn=el("button","photo-remove","Remove Photo"); btn.onclick=()=>{ editPhoto=null; renderPhotoArea(); }; area.appendChild(btn); }
+  if(editPhoto){ area.innerHTML=""; const img=document.createElement("img"); img.src=editPhoto; img.className="photo-preview-img"; area.appendChild(img); const btn=el("button","photo-remove","Remove Photo"); btn.onclick=()=>{ editPhoto=null; editPhotoChanged=true; renderPhotoArea(); }; area.appendChild(btn); }
   else { const p=el("div","photo-picker",`<div class="photo-picker-icon">📷</div><div>Tap to upload a photo</div>`); p.onclick=()=>document.getElementById("photo-file").click(); area.innerHTML=""; area.appendChild(p); }
 }
 document.getElementById("photo-file").onchange=function(){
   const file=this.files[0]; if(!file) return;
   const reader=new FileReader();
-  reader.onload=e=>compressPhoto(e.target.result,compressed=>{ editPhoto=compressed; renderPhotoArea(); });
+  reader.onload=e=>compressPhoto(e.target.result,compressed=>{ editPhoto=compressed; editPhotoChanged=true; renderPhotoArea(); });
   reader.readAsDataURL(file); this.value="";
 };
 
@@ -892,8 +893,10 @@ document.getElementById("save-btn").onclick=async function(){
   if(editId){
     const recipe=state.recipes.find(r=>r.id===editId);
     if(recipe) Object.assign(recipe,{title,tags,comment,ingredients,steps});
-    if(editPhoto) { photoCache[String(editId)]=editPhoto; await dbSavePhoto(editId,editPhoto); }
-    else if(editPhoto===null && photoCache[String(editId)]) { delete photoCache[String(editId)]; await dbDeletePhoto(editId); }
+    if(editPhotoChanged) {
+      if(editPhoto) { photoCache[String(editId)]=editPhoto; await dbSavePhoto(editId,editPhoto); }
+      else { delete photoCache[String(editId)]; await dbDeletePhoto(editId); }
+    }
   } else {
     const date=new Date().toLocaleDateString("en-US",{month:"short",day:"numeric"});
     const id=state.nextId++;
