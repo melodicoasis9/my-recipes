@@ -566,8 +566,7 @@ function renderGrocery() {
   state.grocery = state.grocery.filter(g => !g.checked);
   saveState();
   const count = state.grocery.length;
-  document.getElementById("grocery-tab-btn").textContent =
-    count > 0 ? `🛒 Groceries (${count})` : "🛒 Groceries";
+  document.getElementById("grocery-tab-btn").textContent = "🛒 Groceries";
   renderCatSelect();
   if (state.grocery.length === 0) {
     list.innerHTML = `<div class="empty"><div class="empty-icon">🛒</div><p style="font-size:16px;">Your grocery list is empty.</p><p style="font-size:13px;margin-top:6px;">Add items above or tap "Add to Grocery" on any recipe.</p></div>`;
@@ -1051,7 +1050,15 @@ document.getElementById("sort-name-btn").onclick = function() {
 document.getElementById("backup-btn").onclick=()=>{ document.getElementById("import-msg").style.display="none"; document.getElementById("backup-overlay").style.display="flex"; };
 document.getElementById("export-btn").onclick=async()=>{
   const photos=await dbGetAllPhotos();
-  const data={version:2,exportedAt:new Date().toISOString(),recipes:state.recipes,grocery:state.grocery,photos};
+  const data={
+    version:3,
+    exportedAt:new Date().toISOString(),
+    recipes:state.recipes,
+    grocery:state.grocery,
+    groceryCats:state.groceryCats,
+    ingredientCategoryMemory:state.ingredientCategoryMemory,
+    photos
+  };
   const blob=new Blob([JSON.stringify(data)],{type:"application/json"});
   const url=URL.createObjectURL(blob); const a=document.createElement("a"); a.href=url;
   a.download=`my-recipes-backup-${new Date().toISOString().slice(0,10)}.json`; a.click(); URL.revokeObjectURL(url);
@@ -1068,7 +1075,8 @@ document.getElementById("import-file").onchange=async function(){
       state.recipes=data.recipes;
       state.recipes.forEach(r=>{ if(!r.tags) r.tags=r.folder?[r.folder]:[]; delete r.folder; delete r.photo; });
       if(data.grocery) state.grocery=data.grocery;
-      // Restore photos to IndexedDB and cache
+      if(data.groceryCats) state.groceryCats=data.groceryCats;
+      if(data.ingredientCategoryMemory) state.ingredientCategoryMemory=data.ingredientCategoryMemory;
       if(data.photos) {
         photoCache={};
         for(const [id,photo] of Object.entries(data.photos)) { photoCache[id]=photo; await dbSavePhoto(id,photo); }
